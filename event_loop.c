@@ -22,17 +22,26 @@ struct event_context * initContext() {
     return event_context;
 }
 
+void default_err_handle(struct event_context * context) {
+
+}
+
 void eventLoopAdd(int eventLoop, struct event_context * context) {
     struct epoll_event * epoll_event = malloc(sizeof(struct epoll_event));
     epoll_event -> data.ptr = context;
     context -> eventLoop = eventLoop;
 
-    uint32_t events = 0;
+    uint32_t events = EPOLLET;
     events |= context -> handle_out ? EPOLLOUT : 0;
     events |= context -> handle_in ? EPOLLIN : 0;
     events |= context -> handle_err ? EPOLLERR : 0;
     epoll_event -> events = events;
     epoll_ctl(eventLoop, EPOLL_CTL_ADD, context -> fd, epoll_event);
+}
+
+void eventLoopDel(int eventLoop, struct event_context * context) {
+    // TODO {event} memory leak ?
+    epoll_ctl(eventLoop, EPOLL_CTL_DEL, context -> fd, NULL);
 }
 
 void mainLoop(int epollFD) {

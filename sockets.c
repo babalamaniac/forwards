@@ -27,10 +27,6 @@ int createSocket() {
     return socketFD;
 }
 
-void socketBind(int socketFD, struct sockaddr_in sockaddr) {
-
-}
-
 struct sockaddr_in newAddress(const char * ip, short port) {
     struct sockaddr_in address;
     bzero(&address, sizeof(address));
@@ -42,11 +38,6 @@ struct sockaddr_in newAddress(const char * ip, short port) {
 
 int socketConnect(int socketFD, struct sockaddr_in address) {
     int result = connect(socketFD, (struct sockaddr *)&address, sizeof(struct sockaddr));
-    if (result == -1) {
-        printf("%s\n", strerror(errno));
-        close(socketFD);
-        return -1;
-    }
     return result;
 }
 

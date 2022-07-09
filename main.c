@@ -33,10 +33,25 @@ struct transfer_context {
     int dst_fd;
 };
 
-void src_event_handler(struct event_context * context) {
+void proxy_send(struct event_context * context) {
     struct transfer_context * transfer_context = context->data;
-    int size = sendfile(transfer_context->src_fd, transfer_context->dst_fd, 0, 1024);
-    printf("%d\n", size);
+    char buf[1024];
+    ssize_t count = read(transfer_context->src_fd, buf, 1024);
+    write(transfer_context->dst_fd, buf, count);
+}
+
+void proxy_recv(struct event_context * context) {
+    struct transfer_context * transfer_context = context->data;
+    char buf[1024];
+    ssize_t count = read(transfer_context->dst_fd, buf, 1024);
+    write(transfer_context->src_fd, buf, count);
+}
+
+void error_handler(struct event_context * context) {
+    struct transfer_context * transfer_context = context->data;
+
+    close(transfer_context->src_fd);
+    close(transfer_context->dst_fd);
 }
 
 void client_accept(struct event_context * context) {
@@ -61,11 +76,16 @@ void client_accept(struct event_context * context) {
         struct event_context *dst_event_context = initContext();
         dst_event_context->data = transfer_context;
         dst_event_context->fd = proxy_socket;
-        dst_event_context->handle_out = src_event_handler;
+        dst_event_context->handle_out = proxy_send;
+        dst_event_context->handle_in = proxy_recv;
+        dst_event_context->handle_err = error_handler;
         // src context
         struct event_context *src_event_context = initContext();
         src_event_context->data = transfer_context;
         src_event_context->fd = src_fd;
+        src_event_context->handle_in = proxy_send;
+        src_event_context->handle_out = proxy_recv;
+        src_event_context->handle_err = error_handler;
 
         // add to epoll
         eventLoopAdd(eventLoop, src_event_context);
