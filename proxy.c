@@ -75,12 +75,14 @@ void init_proxy_connect(struct event_context * context) {
 
     int address_size = sizeof (struct sockaddr_in);
     int read_size = proxy_context->address_read_size;
-    read_size += read(context->fd, &(proxy_context->address), address_size - read_size);
+    read_size += read(context->fd, &(proxy_context->address) + read_size, address_size - read_size);
     proxy_context->address_read_size = read_size;
     if (read_size == address_size) {
         // switch to null handler, wait for proxy socket connected
         context->handle_in = NULL;
         // connect remote proxy async
+        proxy_context->dst_context->handle_in = proxy_connect_success;
+        proxy_context->dst_context->handle_out = proxy_connect_success;
         socketConnect(proxy_context->dst_fd, proxy_context->address);
     }
 }
@@ -106,15 +108,15 @@ void client_accept(struct event_context * context) {
         struct event_context *dst_event_context = initContext();
         dst_event_context->data = proxy_context;
         dst_event_context->fd = proxy_socket;
-        dst_event_context->handle_out = proxy_connect_success;
-        dst_event_context->handle_in = proxy_connect_success;
         dst_event_context->handle_err = error_handler;
+        proxy_context->dst_context = dst_event_context;
         // src context
         struct event_context *src_event_context = initContext();
         src_event_context->data = proxy_context;
         src_event_context->fd = src_fd;
         src_event_context->handle_in = init_proxy_connect;
         src_event_context->handle_err = error_handler;
+        proxy_context->src_context = src_event_context;
 
         // add to epoll
         eventLoopAdd(eventLoop, src_event_context);
@@ -131,7 +133,7 @@ int main(int num, char** args) {
 
     // add server fd
     struct event_context server_fd_context;
-    server_fd_context.fd = createServerSocket(args[3], atoi(args[4]));
+    server_fd_context.fd = createServerSocket(args[1], atoi(args[2]));
     server_fd_context.handle_in = client_accept;
     eventLoopAdd(eventLoop, &server_fd_context);
     listen(server_fd_context.fd, 10);

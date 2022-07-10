@@ -31,6 +31,10 @@ struct sockaddr_in proxy_server_address;
 struct transfer_context {
     int src_fd;
     int dst_fd;
+    ssize_t address_send_size;
+    struct sockaddr_in origin_address;
+    struct event_context * src_context;
+    struct event_context * dst_context;
 };
 
 void proxy_send(struct event_context * context) {
@@ -55,6 +59,20 @@ void error_handler(struct event_context * context) {
     eventLoopDel(context->eventLoop, context);
 }
 
+void init_remote_proxy(struct event_context * context) {
+    struct transfer_context * transfer_context = context->data;
+    ssize_t send_size = transfer_context->address_send_size;
+    send_size += write(transfer_context->dst_fd, &transfer_context->origin_address + send_size, sockaddr_size - send_size);
+    transfer_context->address_send_size = send_size;
+    if (send_size == sockaddr_size) {
+        // proxy inited, set all handler
+        transfer_context->dst_context->handle_in = proxy_recv;
+        transfer_context->dst_context->handle_out = proxy_send;
+        transfer_context->src_context->handle_in = proxy_send;
+        transfer_context->src_context->handle_out = proxy_recv;
+    }
+}
+
 void client_accept(struct event_context * context) {
     int eventLoop = context -> eventLoop;
     int src_fd = accept(context -> fd, NULL, NULL);
@@ -63,8 +81,6 @@ void client_accept(struct event_context * context) {
     for (;src_fd > 0 && i < 20; i++, src_fd = accept(context -> fd, NULL, NULL)) {
         // get original dest address
         setNonBlock(src_fd);
-        struct sockaddr_in origin_address;
-        getsockopt(src_fd, SOL_IP, SO_ORIGINAL_DST, &origin_address, &sockaddr_size);
 
         int proxy_socket = createSocket();
 
@@ -72,21 +88,23 @@ void client_accept(struct event_context * context) {
         struct transfer_context *transfer_context = malloc(sizeof(struct transfer_context));
         transfer_context->src_fd = src_fd;
         transfer_context->dst_fd = proxy_socket;
+        transfer_context->address_send_size = 0;
+        getsockopt(src_fd, SOL_IP, SO_ORIGINAL_DST, &(transfer_context->origin_address), (socklen_t*)&sockaddr_size);
 
-        // dst context
+
+        // dst context. When init out handler with init_remote_proxy, to send origin address to the proxy
         struct event_context *dst_event_context = initContext();
         dst_event_context->data = transfer_context;
         dst_event_context->fd = proxy_socket;
-        dst_event_context->handle_out = proxy_send;
-        dst_event_context->handle_in = proxy_recv;
+        dst_event_context->handle_out = init_remote_proxy;
         dst_event_context->handle_err = error_handler;
-        // src context
+        transfer_context->dst_context = dst_event_context;
+        // src context. Ignore all events expect err until proxy socket inited.
         struct event_context *src_event_context = initContext();
         src_event_context->data = transfer_context;
         src_event_context->fd = src_fd;
-        src_event_context->handle_in = proxy_send;
-        src_event_context->handle_out = proxy_recv;
         src_event_context->handle_err = error_handler;
+        transfer_context->src_context = src_event_context;
 
         // add to epoll
         eventLoopAdd(eventLoop, src_event_context);
@@ -94,9 +112,6 @@ void client_accept(struct event_context * context) {
 
         // connect remote proxy async
         socketConnect(proxy_socket, proxy_server_address);
-
-        // TODO send origin address
-        write(proxy_socket, &origin_address, sizeof (struct sockaddr_in));
     }
 }
 
