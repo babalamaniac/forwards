@@ -25,34 +25,64 @@ struct sockaddr_in newAddress(const char * ip, short port);
 int createSocket();
 int socketConnect(int socketFD, struct sockaddr_in address);
 
-// remote server address
-struct sockaddr_in proxy_server_address;
-
-struct transfer_context {
+struct proxy_context {
     int src_fd;
     int dst_fd;
+    int address_read_size;
+    struct sockaddr_in address;
+    struct event_context * src_context;
+    struct event_context * dst_context;
 };
 
 void proxy_send(struct event_context * context) {
-    struct transfer_context * transfer_context = context->data;
+    struct proxy_context * proxy_context = context->data;
     char buf[1024];
-    ssize_t count = read(transfer_context->src_fd, buf, 1024);
-    write(transfer_context->dst_fd, buf, count);
+    ssize_t count = read(proxy_context->src_fd, buf, 1024);
+    write(proxy_context->dst_fd, buf, count);
 }
 
 void proxy_recv(struct event_context * context) {
-    struct transfer_context * transfer_context = context->data;
+    struct proxy_context * proxy_context = context->data;
     char buf[1024];
-    ssize_t count = read(transfer_context->dst_fd, buf, 1024);
-    write(transfer_context->src_fd, buf, count);
+    ssize_t count = read(proxy_context->dst_fd, buf, 1024);
+    write(proxy_context->src_fd, buf, count);
 }
 
 void error_handler(struct event_context * context) {
-    struct transfer_context * transfer_context = context->data;
+    struct proxy_context * proxy_context = context->data;
 
-    close(transfer_context->src_fd);
-    close(transfer_context->dst_fd);
+    close(proxy_context->src_fd);
+    close(proxy_context->dst_fd);
     eventLoopDel(context->eventLoop, context);
+}
+
+/**
+ * origin address connect success, switch all handler to send/recv
+ *
+ * @param context
+ */
+void proxy_connect_success(struct event_context * context) {
+    struct proxy_context * proxy_context = context->data;
+
+    proxy_context->src_context->handle_in = proxy_send;
+    proxy_context->src_context->handle_out = proxy_recv;
+    context->handle_in = proxy_recv;
+    context->handle_out = proxy_send;
+}
+
+void init_proxy_connect(struct event_context * context) {
+    struct proxy_context * proxy_context = context->data;
+
+    int address_size = sizeof (struct sockaddr_in);
+    int read_size = proxy_context->address_read_size;
+    read_size += read(context->fd, &(proxy_context->address), address_size - read_size);
+    proxy_context->address_read_size = read_size;
+    if (read_size == address_size) {
+        // switch to null handler, wait for proxy socket connected
+        context->handle_in = NULL;
+        // connect remote proxy async
+        socketConnect(proxy_context->dst_fd, proxy_context->address);
+    }
 }
 
 void client_accept(struct event_context * context) {
@@ -63,47 +93,36 @@ void client_accept(struct event_context * context) {
     for (;src_fd > 0 && i < 20; i++, src_fd = accept(context -> fd, NULL, NULL)) {
         // get original dest address
         setNonBlock(src_fd);
-        struct sockaddr_in origin_address;
-        getsockopt(src_fd, SOL_IP, SO_ORIGINAL_DST, &origin_address, &sockaddr_size);
 
         int proxy_socket = createSocket();
 
         // build transfer context
-        struct transfer_context *transfer_context = malloc(sizeof(struct transfer_context));
-        transfer_context->src_fd = src_fd;
-        transfer_context->dst_fd = proxy_socket;
+        struct proxy_context *proxy_context = malloc(sizeof(struct proxy_context));
+        proxy_context->address_read_size = 0;
+        proxy_context->src_fd = src_fd;
+        proxy_context->dst_fd = proxy_socket;
 
         // dst context
         struct event_context *dst_event_context = initContext();
-        dst_event_context->data = transfer_context;
+        dst_event_context->data = proxy_context;
         dst_event_context->fd = proxy_socket;
-        dst_event_context->handle_out = proxy_send;
-        dst_event_context->handle_in = proxy_recv;
+        dst_event_context->handle_out = proxy_connect_success;
+        dst_event_context->handle_in = proxy_connect_success;
         dst_event_context->handle_err = error_handler;
         // src context
         struct event_context *src_event_context = initContext();
-        src_event_context->data = transfer_context;
+        src_event_context->data = proxy_context;
         src_event_context->fd = src_fd;
-        src_event_context->handle_in = proxy_send;
-        src_event_context->handle_out = proxy_recv;
+        src_event_context->handle_in = init_proxy_connect;
         src_event_context->handle_err = error_handler;
 
         // add to epoll
         eventLoopAdd(eventLoop, src_event_context);
         eventLoopAdd(eventLoop, dst_event_context);
-
-        // connect remote proxy async
-        socketConnect(proxy_socket, proxy_server_address);
-
-        // TODO send origin address
-        write(proxy_socket, &origin_address, sizeof (struct sockaddr_in));
     }
 }
 
 int main(int num, char** args) {
-    // init remote server address
-    proxy_server_address = newAddress(args[1], atoi(args[2]));
-
     // init event loop
     int eventLoop = createEpollEventLoop();
     if (eventLoop <= 0) {

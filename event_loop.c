@@ -31,11 +31,7 @@ void eventLoopAdd(int eventLoop, struct event_context * context) {
     epoll_event -> data.ptr = context;
     context -> eventLoop = eventLoop;
 
-    uint32_t events = EPOLLET;
-    events |= context -> handle_out ? EPOLLOUT : 0;
-    events |= context -> handle_in ? EPOLLIN : 0;
-    events |= context -> handle_err ? EPOLLERR : 0;
-    epoll_event -> events = events;
+    epoll_event -> events = EPOLLET | EPOLLOUT | EPOLLIN | EPOLLERR;
     epoll_ctl(eventLoop, EPOLL_CTL_ADD, context -> fd, epoll_event);
 }
 
@@ -63,13 +59,13 @@ void mainLoop(int epollFD) {
         while (event_nums -- > 0) {
             struct epoll_event epollEvent = events[event_nums];
             struct event_context * context = (struct event_context *) epollEvent.data.ptr;
-            if (epollEvent.events & EPOLLOUT) {
+            if (epollEvent.events & EPOLLOUT && context -> handle_out != NULL) {
                 context -> handle_out(context);
             }
-            if (epollEvent.events & EPOLLIN) {
+            if (epollEvent.events & EPOLLIN && context -> handle_in != NULL) {
                 context -> handle_in(context);
             }
-            if (epollEvent.events & EPOLLERR) {
+            if (epollEvent.events & EPOLLERR && context -> handle_err != NULL) {
                 context -> handle_err(context);
             }
         }
