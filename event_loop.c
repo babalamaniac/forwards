@@ -22,10 +22,6 @@ struct event_context * initContext() {
     return event_context;
 }
 
-void default_err_handle(struct event_context * context) {
-
-}
-
 void eventLoopAdd(int eventLoop, struct event_context * context) {
     struct epoll_event * epoll_event = malloc(sizeof(struct epoll_event));
     epoll_event -> data.ptr = context;
@@ -35,9 +31,9 @@ void eventLoopAdd(int eventLoop, struct event_context * context) {
     epoll_ctl(eventLoop, EPOLL_CTL_ADD, context -> fd, epoll_event);
 }
 
-void eventLoopDel(int eventLoop, struct event_context * context) {
+void eventLoopDel(int eventLoop, int fd) {
     // TODO {event} memory leak ?
-    epoll_ctl(eventLoop, EPOLL_CTL_DEL, context -> fd, NULL);
+    epoll_ctl(eventLoop, EPOLL_CTL_DEL, fd, NULL);
 }
 
 void mainLoop(int epollFD) {

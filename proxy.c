@@ -1,59 +1,24 @@
 #include <stdlib.h>
-#include <time.h>
 #include <string.h>
-#include <netdb.h>
-#include <sys/types.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <arpa/inet.h>
 #include <unistd.h>
-#include <linux/netfilter_ipv4.h>
-#include <stdio.h>
-#include <pthread.h>
-#include <errno.h>
-#include <sys/epoll.h>
-#include <sys/sendfile.h>
-#include "fcntl.h"
 
-#include "event_loop.c"
 #include "sockets.c"
+#include "proxycontext.c"
 
-int sockaddr_size = sizeof(struct sockaddr_in);
-int createServerSocket(const char * address, short port);
-void setNonBlock(int fd);
-struct sockaddr_in newAddress(const char * ip, short port);
-int createSocket();
-int socketConnect(int socketFD, struct sockaddr_in address);
+int address_size = sizeof(struct sockaddr_in);
 
-struct proxy_context {
-    int src_fd;
-    int dst_fd;
-    int address_read_size;
-    struct sockaddr_in address;
-    struct event_context * src_context;
-    struct event_context * dst_context;
-};
-
-void proxy_send(struct event_context * context) {
-    struct proxy_context * proxy_context = context->data;
-    char buf[1024];
-    ssize_t count = read(proxy_context->src_fd, buf, 1024);
-    write(proxy_context->dst_fd, buf, count);
+void proxySend(struct event_context * context) {
+    proxy_send(context->data);
 }
 
-void proxy_recv(struct event_context * context) {
-    struct proxy_context * proxy_context = context->data;
-    char buf[1024];
-    ssize_t count = read(proxy_context->dst_fd, buf, 1024);
-    write(proxy_context->src_fd, buf, count);
+void proxyRead(struct event_context * context) {
+    proxy_read(context->data);
 }
 
 void error_handler(struct event_context * context) {
-    struct proxy_context * proxy_context = context->data;
-
-    close(proxy_context->src_fd);
-    close(proxy_context->dst_fd);
-    eventLoopDel(context->eventLoop, context);
+    close_proxy(context->data);
 }
 
 /**
@@ -64,18 +29,21 @@ void error_handler(struct event_context * context) {
 void proxy_connect_success(struct event_context * context) {
     struct proxy_context * proxy_context = context->data;
 
-    proxy_context->src_context->handle_in = proxy_send;
-    proxy_context->src_context->handle_out = proxy_recv;
-    context->handle_in = proxy_recv;
-    context->handle_out = proxy_send;
+    proxy_context->src_context->handle_in = proxySend;
+    proxy_context->src_context->handle_out = proxyRead;
+    context->handle_in = proxyRead;
+    context->handle_out = proxySend;
 }
 
 void init_proxy_connect(struct event_context * context) {
     struct proxy_context * proxy_context = context->data;
 
-    int address_size = sizeof (struct sockaddr_in);
     int read_size = proxy_context->address_read_size;
     read_size += read(context->fd, &(proxy_context->address) + read_size, address_size - read_size);
+    if (read_size == proxy_context->address_read_size) {
+        close_proxy(proxy_context);
+        return;
+    }
     proxy_context->address_read_size = read_size;
     if (read_size == address_size) {
         // switch to null handler, wait for proxy socket connected

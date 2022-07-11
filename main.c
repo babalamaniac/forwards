@@ -24,6 +24,7 @@ void setNonBlock(int fd);
 struct sockaddr_in newAddress(const char * ip, short port);
 int createSocket();
 int socketConnect(int socketFD, struct sockaddr_in address);
+ssize_t transfer(int socketA, int socketB);
 
 // remote server address
 struct sockaddr_in proxy_server_address;
@@ -39,16 +40,12 @@ struct transfer_context {
 
 void proxy_send(struct event_context * context) {
     struct transfer_context * transfer_context = context->data;
-    char buf[1024];
-    ssize_t count = read(transfer_context->src_fd, buf, 1024);
-    write(transfer_context->dst_fd, buf, count);
+    transfer(transfer_context->src_fd, transfer_context->dst_fd);
 }
 
 void proxy_recv(struct event_context * context) {
     struct transfer_context * transfer_context = context->data;
-    char buf[1024];
-    ssize_t count = read(transfer_context->dst_fd, buf, 1024);
-    write(transfer_context->src_fd, buf, count);
+    transfer(transfer_context->dst_fd, transfer_context->src_fd);
 }
 
 void error_handler(struct event_context * context) {
