@@ -4,10 +4,15 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "sockets.c"
 #include "proxycontext.c"
 
 int address_size = sizeof(struct sockaddr_in);
+int sockaddr_size = sizeof(struct sockaddr_in);
+int createServerSocket(const char * address, short port);
+void setNonBlock(int fd);
+struct sockaddr_in newAddress(const char * ip, short port);
+int createSocket();
+int socketConnect(int socketFD, struct sockaddr_in address);
 
 void proxySend(struct event_context * context) {
     proxy_send(context->data);
@@ -38,7 +43,7 @@ void proxy_connect_success(struct event_context * context) {
 void init_proxy_connect(struct event_context * context) {
     struct proxy_context * proxy_context = context->data;
 
-    int read_size = proxy_context->address_read_size;
+    ssize_t read_size = proxy_context->address_read_size;
     read_size += read(context->fd, &(proxy_context->address) + read_size, address_size - read_size);
     if (read_size == proxy_context->address_read_size) {
         close_proxy(proxy_context);

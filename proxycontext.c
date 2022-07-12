@@ -16,7 +16,7 @@ struct proxy_context {
     int eventLoop;
     int src_fd;
     int dst_fd;
-    int address_read_size;
+    ssize_t address_read_size;
     struct sockaddr_in address;
     struct event_context * src_context;
     struct event_context * dst_context;
