@@ -4,11 +4,9 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "sockets.c"
 #include "proxycontext.c"
 
 int address_size = sizeof(struct sockaddr_in);
-
 void proxySend(struct event_context * context) {
     proxy_send(context->data);
 }
@@ -28,17 +26,21 @@ void error_handler(struct event_context * context) {
  */
 void proxy_connect_success(struct event_context * context) {
     struct proxy_context * proxy_context = context->data;
+    printf("proxy establish, src_fd=%d, dst_fd=%d\n", proxy_context->src_fd, proxy_context->dst_fd);
 
     proxy_context->src_context->handle_in = proxySend;
     proxy_context->src_context->handle_out = proxyRead;
-    context->handle_in = proxyRead;
-    context->handle_out = proxySend;
+    proxy_context->dst_context->handle_in = proxyRead;
+    proxy_context->dst_context->handle_out = proxySend;
+
+    proxyRead(context);
+    proxySend(context);
 }
 
 void init_proxy_connect(struct event_context * context) {
     struct proxy_context * proxy_context = context->data;
 
-    int read_size = proxy_context->address_read_size;
+    ssize_t read_size = proxy_context->address_read_size;
     read_size += read(context->fd, &(proxy_context->address) + read_size, address_size - read_size);
     if (read_size == proxy_context->address_read_size) {
         close_proxy(proxy_context);
@@ -46,11 +48,24 @@ void init_proxy_connect(struct event_context * context) {
     }
     proxy_context->address_read_size = read_size;
     if (read_size == address_size) {
+        printf("origin address received, src_fd=%d\n", context->fd);
         // switch to null handler, wait for proxy socket connected
         context->handle_in = NULL;
         // connect remote proxy async
-        proxy_context->dst_context->handle_in = proxy_connect_success;
-        proxy_context->dst_context->handle_out = proxy_connect_success;
+        // build transfer context
+        int proxy_socket = createSocket();
+        setNonBlock(proxy_socket);
+
+        // dst context
+        struct event_context *event_context = initContext();
+        event_context->data = proxy_context;
+        event_context->fd = proxy_socket;
+        event_context->handle_in = proxy_connect_success;
+        event_context->handle_out = proxy_connect_success;
+        event_context->handle_err = error_handler;
+        proxy_context->dst_context = event_context;
+        proxy_context->dst_fd = proxy_socket;
+        eventLoopAdd(context->eventLoop, event_context);
         socketConnect(proxy_context->dst_fd, proxy_context->address);
     }
 }
@@ -61,34 +76,26 @@ void client_accept(struct event_context * context) {
     int i = 0;
 
     for (;src_fd > 0 && i < 20; i++, src_fd = accept(context -> fd, NULL, NULL)) {
+        printf("client accept, src_fd=%d\n", src_fd);
         // get original dest address
         setNonBlock(src_fd);
 
-        int proxy_socket = createSocket();
-
-        // build transfer context
         struct proxy_context *proxy_context = malloc(sizeof(struct proxy_context));
         proxy_context->address_read_size = 0;
         proxy_context->src_fd = src_fd;
-        proxy_context->dst_fd = proxy_socket;
+        proxy_context->eventLoop = eventLoop;
 
-        // dst context
-        struct event_context *dst_event_context = initContext();
-        dst_event_context->data = proxy_context;
-        dst_event_context->fd = proxy_socket;
-        dst_event_context->handle_err = error_handler;
-        proxy_context->dst_context = dst_event_context;
         // src context
-        struct event_context *src_event_context = initContext();
-        src_event_context->data = proxy_context;
-        src_event_context->fd = src_fd;
-        src_event_context->handle_in = init_proxy_connect;
-        src_event_context->handle_err = error_handler;
-        proxy_context->src_context = src_event_context;
+        struct event_context *event_context = initContext();
+        event_context->data = proxy_context;
+        event_context->fd = src_fd;
+        event_context->handle_in = init_proxy_connect;
+        event_context->handle_err = error_handler;
+        proxy_context->src_context = event_context;
+        proxy_context->src_fd = src_fd;
 
         // add to epoll
-        eventLoopAdd(eventLoop, src_event_context);
-        eventLoopAdd(eventLoop, dst_event_context);
+        eventLoopAdd(eventLoop, event_context);
     }
 }
 
@@ -106,5 +113,6 @@ int main(int num, char** args) {
     eventLoopAdd(eventLoop, &server_fd_context);
     listen(server_fd_context.fd, 10);
 
+    printf("event loop start\n");
     mainLoop(eventLoop);
 }
