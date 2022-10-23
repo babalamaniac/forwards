@@ -16,78 +16,74 @@
 struct proxy_context {
     int fd;
     struct proxy_context * peer;
+    int peer_buf;
     int pipe[2];
     int state;
 };
 
-ssize_t proxy(int src, int dst) {
+// copy between fd
+ssize_t copy(int from, int to) {
     int size;
-    if (ioctl(src, FIONREAD, &size) == -1) {
+    int buf = from;
+    if (ioctl(buf, FIONREAD, &size) == -1) {
         printf("get readable size error, errno=%d, errmsg=%s\n", errno, strerror(errno));
         size = 0;
     }
-    splice(src, 0, dst, 0, size, SPLICE_F_NONBLOCK);
-    ssize_t count = splice(src, 0, dst, 0, 1, SPLICE_F_NONBLOCK);
-    if (count == 0) {
-	printf("end of src_fd=%d, dst_fd=%d\n", src, dst);
-        fflush(stdout);
-        return 0;
-    }
-    if (count == -1) {
-        if (errno == EAGAIN) {
-            return -1;
-        } else {
-            printf("proxy msg error, sendfile count -1, src=%d, dst=%d, errno=%d, error=%s\n", src, dst, errno, strerror(errno));
-            fflush(stdout);
-            return 0;
-        }
-    }
-
-    return -1;
+    ssize_t count = splice(buf, 0, to, 0, size + 1, SPLICE_F_NONBLOCK);
+    return count;
 }
 
-void do_proxy(struct proxy_context * from, struct proxy_context * to) {
-    printf("from fd=%d  state=%d, to fd=%d state=%d\n", from -> fd, from->state, to->fd,to->state);
-    if (to -> state & WRITE_CLOSED) {
-        from -> state |= READ_CLOSED;
-        return;
-    }
-    ssize_t result;
-    if (!(from -> state & READ_CLOSED)) {
-        result = proxy(from -> fd, from -> pipe[1]);
-        if (result == 0) {
-            from -> state |= READ_CLOSED;
-            close(from -> pipe[1]);
-            shutdown(from -> fd, SHUT_RD);
-        }
-    }
-    result = proxy((from -> pipe)[0], to -> fd);
-    if (result == 0) {
-        to -> state |= WRITE_CLOSED;
-        close(from -> pipe[0]);
-        close(to -> fd);
-    }
-    printf("do proxy from fd=%d  state=%d, to fd=%d state=%d\n", from -> fd, from->state, to->fd,to->state);
+// copy 'from''s buffered data to 'to'
+ssize_t transfer(struct proxy_context * from, struct proxy_context * to) {
+    return copy(from -> pipe[0], to -> fd);
 }
 
-void do_read(struct proxy_context * proxy_context) {
-    proxy(proxy_context -> peer -> pipe[0], proxy_context -> fd);
-}
-
-void do_write(struct proxy_context * proxy_context) {
-    proxy(proxy_context -> fd, proxy_context -> pipe[1]);
-}
-
-void proxy_handle_in(struct proxy_context * proxy_context) {
-    do_proxy(proxy_context, proxy_context -> peer);
-}
-
-void proxy_handle_out(struct proxy_context * proxy_context) {
-    do_proxy(proxy_context -> peer, proxy_context);
+// copy from socket buffer to pipe buffer
+ssize_t mv_into_buf(struct proxy_context * context) {
+    return copy(context -> fd, context -> pipe[1]);
 }
 
 int proxy_need_close(struct proxy_context * proxy_context) {
     return (proxy_context -> state & READ_CLOSED) && (proxy_context -> state & WRITE_CLOSED);
+}
+
+void proxy_handle_out(struct proxy_context * proxy_context) {
+    if (proxy_context -> state & WRITE_CLOSED) {
+        printf("write channel closed, dst fd=%d src fd=%d\n", proxy_context -> peer -> fd, proxy_context -> fd);
+        return;
+    }
+    ssize_t count = transfer(proxy_context -> peer, proxy_context);
+    if (count == 0) {
+        proxy_context -> state |= WRITE_CLOSED;
+        shutdown(proxy_context -> fd, SHUT_WR);
+    }
+}
+
+void proxy_handle_in(struct proxy_context * proxy_context) {
+    if (proxy_context -> state & READ_CLOSED) {
+        printf("read channel closed, dst fd=%d src fd=%d\n", proxy_context -> fd, proxy_context -> peer -> fd);
+        return;
+    }
+    mv_into_buf(proxy_context);
+    transfer(proxy_context, proxy_context -> peer);
+}
+
+void do_read_close(struct proxy_context * context) {
+    if (context -> state & READ_CLOSED) {
+        return;
+    }
+    context -> state |= READ_CLOSED;
+    close(context -> pipe[1]);
+    proxy_handle_out(context -> peer);
+}
+
+void do_close(struct proxy_context * context) {
+    do_read_close(context);
+    context -> state |= WRITE_CLOSED;
+    if (proxy_need_close(context -> peer)) {
+        free(context -> peer);
+        free(context);
+    }
 }
 
 struct proxy_context * init_proxy_context(int fd) {
@@ -108,6 +104,10 @@ void bind_context(struct proxy_context * a, struct proxy_context * b) {
     b -> peer = a;
 }
 
+void bind_context_a(struct event_context * a, struct event_context * b) {
+    ((struct proxy_context *)(a + 1)) -> peer = (struct proxy_context *)(b + 1);
+    ((struct proxy_context *)(b + 1)) -> peer = (struct proxy_context *)(a + 1);
+}
 
 struct proxy_init_context {
     int src_fd;

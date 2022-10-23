@@ -26,11 +26,9 @@ void init_remote_proxy(struct event_context * context) {
         struct proxy_context *dst = init_proxy_context(init_context ->dst_fd);
         bind_context(src, dst);
 
-        context -> data = dst;
-        context -> handle_in = handle_in;
-        context -> handle_out = handle_out;
+        init_proxy_event_context(context, dst);
 
-        eventLoopAdd(context->eventLoop, init_event_context(src, src -> fd, handle_in, handle_out, close_proxy));
+        eventLoopAdd(context->eventLoop, init_proxy_event_context(initContext(), src));
         free(init_context);
     }
 }
@@ -54,8 +52,8 @@ void client_accept(struct event_context * context) {
         event_context->data = init_context;
         event_context->fd = proxy_socket;
         event_context->handle_out = init_remote_proxy;
-        event_context->handle_err = close_proxy;
-        event_context->handle_close = close_proxy;
+        event_context->handle_err = handle_close;
+        event_context->handle_close = handle_close;
 
         // add to epoll
         eventLoopAdd(eventLoop, event_context);
@@ -65,22 +63,22 @@ void client_accept(struct event_context * context) {
     }
 }
 
-int main_2(int num, char** args) {
+int main(int num, char** args) {
     // init remote server address
     proxy_server_address = newAddress(args[1], atoi(args[2]));
     // start event loop
     start_event_loop(createServerSocket(args[3], atoi(args[4])), client_accept);
 }
 void handle_out_a(struct event_context * context) {
-    write(context -> fd, "asdf", 4);
+    shutdown(context -> fd, SHUT_WR);
 }
 void handle_in_a(struct event_context * context) {
-    char buf[1];
-    read(context -> fd, buf, 1);
-    printf("%c\n", *buf);
-    fflush(stdout);
+//    char buf[1];
+//    read(context -> fd, buf, 1);
+//    printf("%c\n", *buf);
+//    fflush(stdout);
 }
-int main(int num, char** args) {
+int main_2(int num, char** args) {
     int epoll_fd = epoll_create(1);
     int socket_fd = createSocket();
 
@@ -96,7 +94,8 @@ int main(int num, char** args) {
     epoll_event -> events = EPOLLET | EPOLLOUT | EPOLLIN | EPOLLERR | EPOLLRDHUP | EPOLLHUP;
     int result = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, socket_fd, epoll_event);
 
-    socketConnect(socket_fd, newAddress("192.168.107.6", 9090));
+    socketConnect(socket_fd, newAddress("192.168.107.2", 20012));
+//    shutdown(socket_fd, SHUT_WR);
     mainLoop(epoll_fd);
 }
 

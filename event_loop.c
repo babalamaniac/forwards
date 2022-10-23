@@ -2,6 +2,7 @@
 #include <sys/epoll.h>
 #include <signal.h>
 #include <stdio.h>
+#include <errno.h>
 
 struct event_context {
     void * data;
@@ -34,7 +35,8 @@ struct event_context * init_event_context(
         int fd,
         void (*handle_in) (struct event_context * context),
         void (*handle_out) (struct event_context * context),
-        void (*handle_err) (struct event_context * context)) {
+        void (*handle_err) (struct event_context * context),
+        void (*handle_read_close) (struct event_context * context)) {
     struct event_context *event_context = malloc(sizeof(struct event_context));
     event_context -> fd = fd;
     event_context -> handle_err = NULL;
@@ -72,6 +74,21 @@ void mainLoop(int epollFD) {
         while (event_nums -- > 0) {
             struct epoll_event epollEvent = events[event_nums];
             struct event_context * context = (struct event_context *) epollEvent.data.ptr;
+            if ((epollEvent.events & EPOLLHUP) || (epollEvent.events & EPOLLERR)) {
+                printf("handle exception fd=%d, rdhup=%d, hup=%d, err=%d\n", context -> fd, epollEvent.events & EPOLLRDHUP, epollEvent.events & EPOLLHUP, epollEvent.events & EPOLLERR);
+                fflush(stdout);
+                if (context -> handle_in != NULL) {
+                    context -> handle_in(context);
+                }
+                if (context -> handle_close != NULL) {
+                    context -> handle_close(context);
+                }
+
+                close(context -> fd);
+                eventLoopDel(epollFD, context -> fd);
+                free(context);
+                continue;
+            }
             if ((epollEvent.events & EPOLLIN) && context -> handle_in != NULL) {
                 context -> handle_in(context);
             }
@@ -80,14 +97,6 @@ void mainLoop(int epollFD) {
             }
             if ((epollEvent.events & EPOLLOUT) && context -> handle_out != NULL) {
                 context -> handle_out(context);
-            }
-            if (((epollEvent.events & EPOLLHUP) || (epollEvent.events & EPOLLERR)) && context -> handle_close != NULL) {
-                printf("handle exception fd=%d, rdhup=%d, hup=%d, err=%d\n", context -> fd, epollEvent.events & EPOLLRDHUP, epollEvent.events & EPOLLHUP, epollEvent.events & EPOLLERR);
-                fflush(stdout);
-                context -> handle_close(context);
-//                close(context -> fd);
-                eventLoopDel(epollFD, context -> fd);
-                free(context);
             }
         }
     }

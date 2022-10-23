@@ -54,14 +54,6 @@ int createServerSocket(const char * ip, short port) {
     return socketfd;
 }
 
-ssize_t transfer(int socketA, int socketB) {
-    char buf[1024];
-    // sendfile not support socket to socket
-    ssize_t count = read(socketA, buf, 1024);
-    write(socketB, buf, count);
-    return count;
-}
-
 int createClientSocket(const char * address, short port) {
     int socketFD = socket(AF_INET, SOCK_STREAM, 0);
     if (socketFD == -1) {

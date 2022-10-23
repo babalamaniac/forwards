@@ -27,12 +27,11 @@ void init_proxy_connect(struct event_context * context) {
         struct proxy_context * src_proxy_context = init_proxy_context(context -> fd);
         struct proxy_context * dst_proxy_context = init_proxy_context(proxy_socket);
         bind_context(src_proxy_context, dst_proxy_context);
-        context -> data = src_proxy_context;
-        context -> handle_in = handle_in;
-        context -> handle_out = handle_out;
+
+        init_proxy_event_context(context, src_proxy_context);
 
         // dst context
-        eventLoopAdd(context->eventLoop, init_event_context(dst_proxy_context, dst_proxy_context -> fd, handle_in, handle_out, close_proxy));
+        eventLoopAdd(context->eventLoop, init_proxy_event_context(initContext(), dst_proxy_context));
         socketConnect(proxy_socket, proxy_init_context->address);
 
         free(proxy_init_context);
@@ -57,7 +56,6 @@ void client_accept(struct event_context * context) {
         event_context->data = proxy_init_context;
         event_context->fd = src_fd;
         event_context->handle_in = init_proxy_connect;
-        event_context->handle_err = close_proxy;
 
         // add to epoll
         eventLoopAdd(eventLoop, event_context);
