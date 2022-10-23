@@ -8,27 +8,25 @@
 #include <unistd.h>
 #include <linux/netfilter_ipv4.h>
 
-#include "base_proxy.c"
+#include "proxy_context.c"
 
 int address_size = sizeof(struct sockaddr_in);
 
 // remote server address
 struct sockaddr_in proxy_server_address;
 
-void init_remote_proxy(struct event_context * context) {
-    struct proxy_init_context * init_context = context->data;
+void init_remote_proxy(struct event_context * dst_context) {
+    struct proxy_init_context * init_context = dst_context->data;
     ssize_t send_size = init_context -> size;
-    send_size += write(context -> fd, &(init_context->address) + send_size, address_size - send_size);
+    send_size += write(dst_context -> fd, &(init_context->address) + send_size, address_size - send_size);
     init_context -> size = send_size;
     if (send_size == address_size) {
-        // proxy inited, set all handler
-        struct proxy_context *src = init_proxy_context(init_context ->src_fd);
-        struct proxy_context *dst = init_proxy_context(init_context ->dst_fd);
-        bind_context(src, dst);
+        struct event_context * src_context = create_proxy_event_context(init_context -> src_fd);
+        init_proxy_event_context(src_context);
+        init_proxy_event_context(dst_context);
+        bind_context(src_context, dst_context);
 
-        init_proxy_event_context(context, dst);
-
-        eventLoopAdd(context->eventLoop, init_proxy_event_context(initContext(), src));
+        eventLoopAdd(dst_context -> eventLoop, src_context);
         free(init_context);
     }
 }
@@ -48,12 +46,9 @@ void client_accept(struct event_context * context) {
         struct proxy_init_context * init_context = init_proxy_init_context(src_fd, proxy_socket);
         getsockopt(src_fd, SOL_IP, SO_ORIGINAL_DST, &(init_context->address), (socklen_t*)&address_size);
 
-        struct event_context * event_context = initContext();
+        struct event_context * event_context = create_proxy_event_context(proxy_socket);
         event_context->data = init_context;
-        event_context->fd = proxy_socket;
         event_context->handle_out = init_remote_proxy;
-        event_context->handle_err = handle_close;
-        event_context->handle_close = handle_close;
 
         // add to epoll
         eventLoopAdd(eventLoop, event_context);
@@ -78,25 +73,25 @@ void handle_in_a(struct event_context * context) {
 //    printf("%c\n", *buf);
 //    fflush(stdout);
 }
-int main_2(int num, char** args) {
-    int epoll_fd = epoll_create(1);
-    int socket_fd = createSocket();
-
-    struct event_context * event_context = initContext();
-    event_context->fd = socket_fd;
-
-    struct epoll_event * epoll_event = malloc(sizeof(struct epoll_event));
-    struct event_context * eventContext = initContext();
-    eventContext -> fd = socket_fd;
-    eventContext -> handle_out = handle_out_a;
-    eventContext -> handle_in = handle_in_a;
-    epoll_event -> data.ptr = eventContext;
-    epoll_event -> events = EPOLLET | EPOLLOUT | EPOLLIN | EPOLLERR | EPOLLRDHUP | EPOLLHUP;
-    int result = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, socket_fd, epoll_event);
-
-    socketConnect(socket_fd, newAddress("192.168.107.2", 20012));
-//    shutdown(socket_fd, SHUT_WR);
-    mainLoop(epoll_fd);
-}
+//int main_2(int num, char** args) {
+//    int epoll_fd = epoll_create(1);
+//    int socket_fd = createSocket();
+//
+//    struct event_context * event_context = initContext();
+//    event_context->fd = socket_fd;
+//
+//    struct epoll_event * epoll_event = malloc(sizeof(struct epoll_event));
+//    struct event_context * eventContext = initContext();
+//    eventContext -> fd = socket_fd;
+//    eventContext -> handle_out = handle_out_a;
+//    eventContext -> handle_in = handle_in_a;
+//    epoll_event -> data.ptr = eventContext;
+//    epoll_event -> events = EPOLLET | EPOLLOUT | EPOLLIN | EPOLLERR | EPOLLRDHUP | EPOLLHUP;
+//    int result = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, socket_fd, epoll_event);
+//
+//    socketConnect(socket_fd, newAddress("192.168.107.2", 20012));
+////    shutdown(socket_fd, SHUT_WR);
+//    mainLoop(epoll_fd);
+//}
 
 

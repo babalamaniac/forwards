@@ -6,32 +6,30 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "base_proxy.c"
+#include "proxy_context.c"
 
 int address_size = sizeof(struct sockaddr_in);
 
-void init_proxy_connect(struct event_context * context) {
-    struct proxy_init_context * proxy_init_context = context->data;
+void init_proxy_connect(struct event_context * src_context) {
+    struct proxy_init_context * proxy_init_context = src_context->data;
 
     ssize_t read_size = proxy_init_context->size;
-    read_size += read(context->fd, &(proxy_init_context->address) + read_size, address_size - read_size);
+    read_size += read(src_context->fd, &(proxy_init_context->address) + read_size, address_size - read_size);
     if (read_size == proxy_init_context->size) {
         printf("init proxy read size = 0\n");
         return;
     }
     proxy_init_context->size = read_size;
     if (read_size == address_size) {
-        printf("origin address received, src_fd=%d\n", context->fd);
+        printf("origin address received, src_fd=%d\n", src_context->fd);
         int proxy_socket = createSocket();
-
-        struct proxy_context * src_proxy_context = init_proxy_context(context -> fd);
-        struct proxy_context * dst_proxy_context = init_proxy_context(proxy_socket);
-        bind_context(src_proxy_context, dst_proxy_context);
-
-        init_proxy_event_context(context, src_proxy_context);
+        struct event_context * dst_context = create_proxy_event_context(proxy_socket);
+        init_proxy_event_context(src_context);
+        init_proxy_event_context(dst_context);
+        bind_context(src_context, dst_context);
 
         // dst context
-        eventLoopAdd(context->eventLoop, init_proxy_event_context(initContext(), dst_proxy_context));
+        eventLoopAdd(src_context->eventLoop, dst_context);
         socketConnect(proxy_socket, proxy_init_context->address);
 
         free(proxy_init_context);
@@ -52,9 +50,8 @@ void client_accept(struct event_context * context) {
         proxy_init_context -> size = 0;
 
         // src context
-        struct event_context *event_context = initContext();
+        struct event_context *event_context = create_proxy_event_context(src_fd);
         event_context->data = proxy_init_context;
-        event_context->fd = src_fd;
         event_context->handle_in = init_proxy_connect;
 
         // add to epoll

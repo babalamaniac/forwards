@@ -7,7 +7,6 @@
 struct event_context {
     void * data;
     int fd;
-    int pipe[2];
     int eventLoop;
     void (*handle_out) (struct event_context * context);
     void (*handle_in)  (struct event_context * context);
@@ -17,15 +16,21 @@ struct event_context {
     int closed;
 };
 
+void * get_ext(struct event_context * context) {
+    return context + 1;
+}
+
 int createEpollEventLoop() {
     return epoll_create(1);
 }
 
-struct event_context * initContext() {
-    struct event_context *event_context = malloc(sizeof(struct event_context));
+struct event_context * initContext(size_t ext_size) {
+    struct event_context *event_context = malloc(sizeof(struct event_context) + ext_size);
     event_context -> handle_err = NULL;
     event_context -> handle_out = NULL;
     event_context -> handle_in = NULL;
+    event_context -> handle_close = NULL;
+    event_context -> handle_read_close = NULL;
     event_context -> closed = 0;
     return event_context;
 }
