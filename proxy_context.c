@@ -10,7 +10,6 @@
 #include <fcntl.h>
 
 #include "event_loop.c"
-#include "sockets.c"
 
 #define READ_CLOSED (1 << 0)
 #define WRITE_CLOSED (1 << 1)
@@ -104,6 +103,7 @@ struct proxy_init_context {
     int src_fd;
     int dst_fd;
     ssize_t size;
+    struct event_context * src_event_context;
     struct sockaddr_in address;
 };
 
@@ -138,3 +138,9 @@ struct proxy_context * init_proxy_event_context(struct event_context * event_con
     fcntl((proxy_context -> pipe)[1], F_SETPIPE_SZ, 100 * 1024 * 1024);
     return proxy_context;
 }
+
+int max(int a, int b) {
+    return a > b ? a : b;
+}
+
+#define PROXY_CONTEXT_SIZE max(sizeof (struct proxy_context), sizeof (struct proxy_init_context))

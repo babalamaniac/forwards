@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <errno.h>
 
+#include "sockets.c"
+
 struct event_context {
     void * data;
     int fd;
@@ -31,26 +33,6 @@ struct event_context * initContext(size_t ext_size) {
     event_context -> handle_in = NULL;
     event_context -> handle_close = NULL;
     event_context -> handle_read_close = NULL;
-    event_context -> closed = 0;
-    return event_context;
-}
-
-struct event_context * init_event_context(
-        void * data,
-        int fd,
-        void (*handle_in) (struct event_context * context),
-        void (*handle_out) (struct event_context * context),
-        void (*handle_err) (struct event_context * context),
-        void (*handle_read_close) (struct event_context * context)) {
-    struct event_context *event_context = malloc(sizeof(struct event_context));
-    event_context -> fd = fd;
-    event_context -> handle_err = NULL;
-    event_context -> handle_out = handle_out;
-    event_context -> handle_in = handle_in;
-    event_context -> handle_err = handle_err;
-    event_context -> handle_close = handle_err;
-
-    event_context -> data = data;
     event_context -> closed = 0;
     return event_context;
 }
@@ -107,7 +89,49 @@ void mainLoop(int epollFD) {
     }
 }
 
-void start_event_loop(int server_fd, void (*handler)  (struct event_context * context)) {
+struct server_context {
+    void (*client_init_handler)  (struct event_context * context);
+    size_t ext_size;
+};
+
+void client_accept(struct event_context * context) {
+    struct server_context * server_context = get_ext(context);
+    int src_fd = accept(context -> fd, NULL, NULL);
+    int i = 0;
+
+    for (;src_fd > 0 && i < 20; i++, src_fd = accept(context -> fd, NULL, NULL)) {
+        // get original dest address
+        setNonBlock(src_fd);
+        printf("accept src fd=%d\n", src_fd);
+
+        struct event_context * client_context = initContext(server_context -> ext_size);
+        client_context -> fd = src_fd;
+        server_context -> client_init_handler(client_context);
+
+        eventLoopAdd(context -> eventLoop, client_context);
+    }
+}
+
+struct init_context {
+    void (*handle_out) (struct event_context * context);
+    size_t ext_size;
+    void * ptr;
+};
+
+void event_connect(int eventLoop, struct sockaddr_in * address, struct init_context init_context) {
+    int fd = createSocket();
+    struct event_context * context = initContext(init_context.ext_size);
+    context -> fd = fd;
+    if (init_context.handle_out != NULL) {
+        context -> handle_out = init_context.handle_out;
+    }
+    memcpy(get_ext(context), init_context.ptr, sizeof (init_context.ptr));
+    eventLoopAdd(eventLoop, context);
+    socketConnect(fd, *address);
+}
+
+void start_event_loop(int server_fd, void (*handler)  (struct event_context * context), size_t ext_size) {
+    setNonBlock(server_fd);
     // init event loop
     int eventLoop = createEpollEventLoop();
     if (eventLoop <= 0) {
@@ -115,11 +139,16 @@ void start_event_loop(int server_fd, void (*handler)  (struct event_context * co
     }
 
     // add server fd
-    struct event_context server_fd_context;
-    server_fd_context.fd = server_fd;
-    server_fd_context.handle_in = handler;
-    eventLoopAdd(eventLoop, &server_fd_context);
-    listen(server_fd_context.fd, 10);
+    struct event_context * server_fd_context = initContext(sizeof(struct server_context));
+    server_fd_context -> fd = server_fd;
+    server_fd_context -> handle_in = client_accept;
+
+    struct server_context * server_context = get_ext(server_fd_context);
+    server_context -> client_init_handler = handler;
+    server_context -> ext_size = ext_size;
+
+    eventLoopAdd(eventLoop, server_fd_context);
+    listen(server_fd, 100);
 
     printf("event loop start\n");
     fflush(stdout);

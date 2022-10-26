@@ -44,7 +44,6 @@ int createServerSocket(const char * ip, short port) {
         printf("socket listen failed\n");
         return -1;
     }
-    setNonBlock(socketfd);
     struct sockaddr_in address = newAddress(ip, port);
     int res = bind(socketfd, (struct sockaddr *)&address, sizeof(struct sockaddr));
     if (res == -1) {
