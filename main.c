@@ -34,17 +34,14 @@ void init_child(struct event_context * context) {
     getsockopt(context -> fd, SOL_IP, SO_ORIGINAL_DST, &(init_context->address), (socklen_t*)&address_size);
     init_context -> src_event_context = context;
 
-    struct init_context client_init_context = {
-            init_remote_proxy,
-            PROXY_CONTEXT_SIZE,
-            init_context
-    };
-    event_connect(context -> eventLoop, &proxy_server_address, client_init_context);
+    struct event_context * dst_context = event_connect(context -> eventLoop, &proxy_server_address, PROXY_CONTEXT_SIZE);
+    memcpy(get_ext(dst_context), init_context, sizeof (struct proxy_init_context));
+    dst_context -> handle_out = init_remote_proxy;
 }
 
 int main(int num, char** args) {
     // init remote server address
     proxy_server_address = newAddress(args[1], atoi(args[2]));
     // start event loop
-    start_event_loop(createServerSocket(args[3], atoi(args[4])), init_child, sizeof(struct proxy_context));
+    start_event_loop(createServerSocket(args[3], atoi(args[4])), init_child, PROXY_CONTEXT_SIZE);
 }

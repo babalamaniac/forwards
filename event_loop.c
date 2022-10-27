@@ -15,6 +15,7 @@ struct event_context {
     void (*handle_err) (struct event_context * context);
     void (*handle_close) (struct event_context * context);
     void (*handle_read_close) (struct event_context * context);
+    void (*handle_unregister) (struct event_context * context);
     int closed;
 };
 
@@ -43,6 +44,7 @@ void eventLoopAdd(int eventLoop, struct event_context * context) {
     context -> eventLoop = eventLoop;
 
     epoll_event -> events = EPOLLET | EPOLLOUT | EPOLLIN | EPOLLERR | EPOLLRDHUP | EPOLLHUP;
+    printf("event loop add el=%d, fd=%d, events=%d\n", eventLoop, context -> fd, epoll_event -> events);
     epoll_ctl(eventLoop, EPOLL_CTL_ADD, context -> fd, epoll_event);
 }
 
@@ -99,13 +101,14 @@ void client_accept(struct event_context * context) {
     int src_fd = accept(context -> fd, NULL, NULL);
     int i = 0;
 
-    for (;src_fd > 0 && i < 20; i++, src_fd = accept(context -> fd, NULL, NULL)) {
+    for (;src_fd > 0 && i < 100; i++, src_fd = accept(context -> fd, NULL, NULL)) {
         // get original dest address
         setNonBlock(src_fd);
         printf("accept src fd=%d\n", src_fd);
 
         struct event_context * client_context = initContext(server_context -> ext_size);
         client_context -> fd = src_fd;
+        client_context -> eventLoop = context -> eventLoop;
         server_context -> client_init_handler(client_context);
 
         eventLoopAdd(context -> eventLoop, client_context);
@@ -118,16 +121,13 @@ struct init_context {
     void * ptr;
 };
 
-void event_connect(int eventLoop, struct sockaddr_in * address, struct init_context init_context) {
+struct event_context * event_connect(int eventLoop, struct sockaddr_in * address, int ext_size) {
     int fd = createSocket();
-    struct event_context * context = initContext(init_context.ext_size);
+    struct event_context * context = initContext(ext_size);
     context -> fd = fd;
-    if (init_context.handle_out != NULL) {
-        context -> handle_out = init_context.handle_out;
-    }
-    memcpy(get_ext(context), init_context.ptr, sizeof (init_context.ptr));
     eventLoopAdd(eventLoop, context);
     socketConnect(fd, *address);
+    return context;
 }
 
 void start_event_loop(int server_fd, void (*handler)  (struct event_context * context), size_t ext_size) {
