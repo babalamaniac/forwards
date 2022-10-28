@@ -23,14 +23,25 @@ struct proxy_context {
 };
 
 // copy between fd
-ssize_t copy(int from, int to) {
+ssize_t copy(int from, int to, int type) {
     int size;
     int buf = from;
     if (ioctl(buf, FIONREAD, &size) == -1) {
         printf("get readable size error, errno=%d, errmsg=%s\n", errno, strerror(errno));
         size = 0;
     }
-    ssize_t count = splice(buf, 0, to, 0, size + 1, SPLICE_F_NONBLOCK);
+    ssize_t count;
+    if (type) {
+        int arr[size + 1];
+        count = read(buf, arr, size + 1);
+        if (count <= 0) {
+            return count;
+        }
+        for (int i = 0; i < count; i++) arr[i] = ~(arr[i]);
+        count = write(to, arr, count);
+    } else {
+        count = splice(buf, 0, to, 0, size + 1, SPLICE_F_NONBLOCK);
+    }
     return count;
 }
 
@@ -40,7 +51,7 @@ void proxy_handle_out(struct event_context * event_context) {
         printf("write channel closed, dst fd=%d src fd=%d\n", proxy_context -> peer_context -> fd, event_context -> fd);
         return;
     }
-    ssize_t count = copy(proxy_context -> out_buf, event_context -> fd);
+    ssize_t count = copy(proxy_context -> out_buf, event_context -> fd, 0);
     if (count == 0) {
         proxy_context -> state |= WRITE_CLOSED;
         shutdown(event_context -> fd, SHUT_WR);
@@ -53,7 +64,7 @@ void proxy_handle_in(struct event_context * event_context) {
         printf("read channel closed, dst fd=%d src fd=%d\n", event_context -> fd, proxy_context -> peer_context -> fd);
         return;
     }
-    copy(event_context -> fd, proxy_context -> in_buf);
+    copy(event_context -> fd, proxy_context -> in_buf, 1);
     proxy_handle_out(proxy_context -> peer_context);
 }
 

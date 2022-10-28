@@ -115,12 +115,6 @@ void client_accept(struct event_context * context) {
     }
 }
 
-struct init_context {
-    void (*handle_out) (struct event_context * context);
-    size_t ext_size;
-    void * ptr;
-};
-
 struct event_context * event_connect(int eventLoop, struct sockaddr_in * address, int ext_size) {
     int fd = createSocket();
     struct event_context * context = initContext(ext_size);
