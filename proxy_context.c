@@ -53,6 +53,7 @@ size_t move(int from, int to) {
     for (int i = 0; i < read_size; ++i) buf[i] = ~buf[i];
     ssize_t write_size = write(to, buf, read_size);
     printf("expect size = %d, actual read_size = %ld, actual write size = %ld\n", size, read_size, write_size);
+    return write_size;
 }
 
 void proxy_handle_out(struct event_context * event_context) {
