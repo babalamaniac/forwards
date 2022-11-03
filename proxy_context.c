@@ -73,7 +73,7 @@ void do_close(struct event_context * event_context) {
         return;
     }
     context -> state |= WRITE_CLOSED;
-    shutdown(event_context -> fd, SHUT_WR);
+    close(event_context -> fd, SHUT_WR);
 }
 
 struct proxy_context * init_proxy_context() {
