@@ -92,14 +92,7 @@ void do_close(struct event_context * event_context) {
         return;
     }
     peer -> state = peer -> state | INVALID | READ_CLOSED | WRITE_CLOSED;
-    close(context -> peer_context -> fd);
-}
-
-struct proxy_context * init_proxy_context() {
-    struct proxy_context *proxy_context = malloc(sizeof(struct proxy_context));
-    proxy_context -> state = 0;
-    proxy_context -> peer_context = NULL;
-    return proxy_context;
+    shutdown(context -> peer_context -> fd, SHUT_RDWR);
 }
 
 void bind_context(struct event_context * a, struct event_context * b) {
@@ -123,12 +116,6 @@ struct proxy_init_context * init_proxy_init_context(int src_fd, int dst_fd) {
     context -> dst_fd = dst_fd;
     context -> size = 0;
     return context;
-}
-
-struct event_context * create_proxy_event_context(int fd) {
-    struct event_context * event_context = initContext(sizeof(struct proxy_context));
-    event_context -> fd = fd;
-    return event_context;
 }
 
 struct proxy_context * init_proxy_event_context(struct event_context * event_context) {
