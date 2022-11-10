@@ -9,6 +9,20 @@
 
 int address_size = sizeof(struct sockaddr_in);
 
+void init_proxy(struct event_context * dst_context) {
+    printf("dst connected, fd = %d\n", dst_context -> fd);
+    struct proxy_context * dst_proxy_context = get_ext(dst_context);
+    struct event_context * src_context = dst_proxy_context -> peer_context;
+    struct proxy_context * src_proxy_context = get_ext(src_context);
+
+    init_proxy_event_context(src_context);
+    init_proxy_event_context(dst_context);
+    dst_proxy_context -> peer_context = src_context;
+    src_proxy_context -> peer_context = dst_context;
+    dst_context -> handle_in(dst_context);
+    dst_context -> handle_out(dst_context);
+}
+
 void init_proxy_connect(struct event_context * src_context) {
     struct proxy_init_context * proxy_init_context = get_ext(src_context);
 
@@ -21,9 +35,9 @@ void init_proxy_connect(struct event_context * src_context) {
     proxy_init_context->size = read_size;
     if (read_size == address_size) {
         printf("origin address received, src_fd=%d\n", src_context->fd);
+        src_context -> handle_in = NULL;
         struct event_context * dst_context = event_connect(src_context -> eventLoop, &proxy_init_context->address, PROXY_CONTEXT_SIZE);
-        init_proxy_event_context(src_context);
-        init_proxy_event_context(dst_context);
+        dst_context -> handle_out = init_proxy;
         bind_context(src_context, dst_context);
     }
 }

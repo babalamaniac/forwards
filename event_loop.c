@@ -73,8 +73,8 @@ void mainLoop(int epollFD) {
                     context -> handle_close(context);
                 }
 
-                close(context -> fd);
                 eventLoopDel(epollFD, context -> fd);
+                close(context -> fd);
                 free(context);
                 continue;
             }
