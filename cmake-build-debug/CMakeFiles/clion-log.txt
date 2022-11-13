@@ -1,4 +1,0 @@
-/home/zhc/Downloads/clion-2022.1.2/bin/cmake/linux/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_MAKE_PROGRAM=/home/zhc/Downloads/clion-2022.1.2/bin/ninja/linux/ninja -G Ninja -S /home/zhc/CLionProjects/forwards -B /home/zhc/CLionProjects/forwards/cmake-build-debug
--- Configuring done
--- Generating done
--- Build files have been written to: /home/zhc/CLionProjects/forwards/cmake-build-debug
