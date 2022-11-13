@@ -20,19 +20,6 @@ struct proxy_context {
     int state; // peer state
 };
 
-int context_state(struct event_context * context) {
-    return ((struct proxy_context *) get_ext(context)) -> state;
-}
-
-void set_peer_state(struct proxy_context * proxy_context, int value) {
-    if (proxy_context -> state | INVALID) {
-        return;
-    }
-    struct proxy_context * peer_proxy_context = get_ext(proxy_context -> peer_context);
-    peer_proxy_context -> state |= value;
-}
-
-
 size_t move(int from, int to) {
     int send_buf_size, send_buf_used, unread_size, size, send_buf_remain;
     ioctl(to, TIOCOUTQ, &send_buf_used);
@@ -58,7 +45,7 @@ size_t move(int from, int to) {
 
 void proxy_handle_out(struct event_context * event_context) {
     struct proxy_context * proxy_context = get_ext(event_context);
-    if (proxy_context -> state & READ_CLOSED) {
+    if (proxy_context -> state & INVALID) {
         printf("write channel closed, dst fd=%d src fd=%d\n", proxy_context -> peer_context -> fd, event_context -> fd);
         return;
     }
@@ -67,7 +54,7 @@ void proxy_handle_out(struct event_context * event_context) {
 
 void proxy_handle_in(struct event_context * event_context) {
     struct proxy_context * proxy_context = get_ext(event_context);
-    if (proxy_context -> state & WRITE_CLOSED) {
+    if (proxy_context -> state & INVALID) {
         printf("read channel closed, dst fd=%d src fd=%d\n", event_context -> fd, proxy_context -> peer_context -> fd);
         return;
     }
@@ -76,22 +63,21 @@ void proxy_handle_in(struct event_context * event_context) {
 
 void do_read_close(struct event_context * event_context) {
     struct proxy_context * context = get_ext(event_context);
-    struct proxy_context * peer = get_ext(context -> peer_context);
-    if (context -> state & WRITE_CLOSED) {
+    if (context -> state & INVALID) {
         return;
     }
-    context -> state |= WRITE_CLOSED;
-    peer -> state |= READ_CLOSED;
     shutdown(context -> peer_context -> fd, SHUT_WR);
+    shutdown(event_context -> fd, SHUT_WR);
 }
 
 void do_close(struct event_context * event_context) {
     struct proxy_context * context = get_ext(event_context);
     struct proxy_context * peer = get_ext(context -> peer_context);
     if (context -> state & INVALID) {
+        shutdown(event_context -> fd, SHUT_RDWR);
         return;
     }
-    peer -> state = peer -> state | INVALID | READ_CLOSED | WRITE_CLOSED;
+    peer -> state = peer -> state | INVALID;
     shutdown(context -> peer_context -> fd, SHUT_RDWR);
 }
 
@@ -126,7 +112,6 @@ struct proxy_context * init_proxy_event_context(struct event_context * event_con
 
     struct proxy_context * proxy_context = get_ext(event_context);
     proxy_context -> state = 0;
-    proxy_context -> peer_context = NULL;
     return proxy_context;
 }
 
